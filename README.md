@@ -19,7 +19,7 @@ The `movements` kafka messages are consumed from the `bank-account-movements` :
 }
 ```
 
-The processor publishes authorization results in the `movements-authorizations` tropic : 
+The processor publishes authorization results in the `movements-authorizations` topic : 
 
 ```json
 {
@@ -42,7 +42,7 @@ Run `docker-compose up` to pull and install dependencies :
 - kafka
 - zookeeper
 
-### Kafka topics
+### Create the kafka topics
 
 Run bash into the kafka container : 
 
