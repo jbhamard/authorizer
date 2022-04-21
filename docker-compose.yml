@@ -1,0 +1,58 @@
+version: "3.8"
+
+volumes:
+  data_kafka: null
+  data_zookeeper: null
+
+networks:
+  kstreams: null
+
+services:
+  authorizer:
+    tty: true
+    stdin_open: true
+    build:
+      args:
+        - SBT_VERSION=1.4.7
+      context: .
+      dockerfile: Dockerfile
+    command: ["sbt","run"]
+    env_file:
+      - ./.env
+    volumes:
+      - .:/app:delegated
+    depends_on:
+      - kafka
+    networks:
+      - kstreams
+
+  kafka:
+    image: confluentinc/cp-kafka:6.1.1
+    ports:
+      - 9092:9092
+    depends_on:
+      - zookeeper
+    volumes:
+      - data_kafka:/var/log/kafka
+    environment:
+      CONFLUENT_SUPPORT_METRICS_ENABLE: "false"
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_LOG_DIRS: /var/log/kafka
+      KAFKA_BROKER_ID: 1
+    networks:
+      - kstreams
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:6.1.1
+    ports:
+      - 2181:2181
+    volumes:
+      - data_zookeeper:/var/lib/zookeeper/data
+    environment:
+      CONFLUENT_SUPPORT_METRICS_ENABLE: "false"
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_DATA_DIR: /var/lib/zookeeper/data
+    networks:
+      - kstreams
