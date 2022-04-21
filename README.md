@@ -1,4 +1,4 @@
-# authorizer
+# Authorizer
 
 ## Overview
 
@@ -59,7 +59,7 @@ Then, in the container, create the required topics :
 
 ## Restart the app
 
-`docker-compose restart authorize`
+`docker-compose restart authorizer`
 
 The app should now be running.
 
@@ -67,8 +67,14 @@ The app should now be running.
 
 In order to use the app, we need to create a producer to `bank-account-movements` and a consumer of `movements-authorizations` :
 
-In your kafka container, run :
+In your kafka container, run the producer :
 
-`/bin/kafka-console-producer --broker-list localhost:9092 --topic bank-account-movements --property parse.key=true --property key.separator=,`
+```
+# this starts the producer and produces a movement on iban1
+
+/bin/kafka-console-producer --broker-list localhost:9092 --topic bank-account-movements --property parse.key=true --property key.separator=,
+>iban1,{"movementId":"mvt_id","amountCents":100,"direction":"credit","iban":"iban1"}
+```
 
 `/bin/kafka-console-consumer --topic movements-authorizations --from-beginning  --bootstrap-server kafka:9092  --property print.key=true`
+
