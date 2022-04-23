@@ -3,7 +3,7 @@ package com.qonto.streams
 import com.qonto.streams.movements.MovementTransformer
 import com.qonto.streams.serde.JsonSerde
 import org.apache.kafka.streams.scala.StreamsBuilder
-import org.apache.kafka.streams.scala.kstream.KStream
+import org.apache.kafka.streams.scala.kstream.{KStream, KTable}
 import org.apache.kafka.streams.state.Stores
 import org.apache.kafka.streams.{KafkaStreams, StreamsConfig}
 
@@ -27,39 +27,49 @@ object Authorizer extends App {
     p
   }
 
-  case class BankAccountMovement(movementId: String, amountCents: Long, iban: String, direction: String)
-
-  implicit val bankAccountMovementsSerde = new JsonSerde[BankAccountMovement]
-
-  case class BankAccountMovementAuthorization(
-                                         movementId: String,
-                                         amountCents: Long,
-                                         balanceCents: Long,
-                                         iban: String,
-                                         authorized: Boolean
-                                       )
-
-  implicit val bankAccountMovementAuthorizationsSerde = new JsonSerde[BankAccountMovementAuthorization]
-
-  case class BankAccount(iban: String, balance: Long)
-
+  case class BankAccount(iban: String, creditBlocked: Boolean, debitBlocked: Boolean, closed: Boolean)
   implicit val bankAccountSerde = new JsonSerde[BankAccount]
 
+  case class BankAccountMovement(movementId: String, amountCents: Long, iban: String, direction: String)
+  implicit val bankAccountMovementsSerde = new JsonSerde[BankAccountMovement]
+
+  case class  MovementWithBankAccount(movement: BankAccountMovement, bankAccount: BankAccount)
+
+  case class BankAccountMovementAuthorization(
+    movementId: String,
+    amountCents: Long,
+    balanceCents: Long,
+    iban: String,
+    authorized: Boolean,
+    declinedReason: String
+  )
+  implicit val bankAccountMovementAuthorizationsSerde = new JsonSerde[BankAccountMovementAuthorization]
+
+  case class BankAccountBalance(iban: String, balance: Long)
+  implicit val bankAccountBalanceSerde = new JsonSerde[BankAccountBalance]
+
   val builder = new StreamsBuilder()
+
+  val bankAccountsTable: KTable[String, BankAccount] = builder.table[String, BankAccount]("bank-account")
 
   val bankAccountMovements: KStream[String, BankAccountMovement] =
     builder.stream[String, BankAccountMovement]("bank-account-movements")
 
-  val accountsStoreName = "bank-accounts-store"
-  val bankAccountsStore = Stores.keyValueStoreBuilder(
+  val movementsWithBankAccount: KStream[String, MovementWithBankAccount] =
+    bankAccountMovements.leftJoin[BankAccount, MovementWithBankAccount](bankAccountsTable) {(BankAccountMovement, BankAccount) =>
+      MovementWithBankAccount(BankAccountMovement ,BankAccount)
+    }
+
+  val accountsStoreName = "bank-accounts-balance-store"
+  val bankAccountBalanceStore = Stores.keyValueStoreBuilder(
     Stores.persistentKeyValueStore(accountsStoreName),
     stringSerde,
-    bankAccountSerde
+    bankAccountBalanceSerde
   ).withCachingEnabled()
 
-  builder.addStateStore(bankAccountsStore)
+  builder.addStateStore(bankAccountBalanceStore)
 
-  val movementAuthorizationStream: KStream[String, BankAccountMovementAuthorization] = bankAccountMovements
+  val movementAuthorizationStream: KStream[String, BankAccountMovementAuthorization] = movementsWithBankAccount
     .peek((_, mvt) => println(mvt))
     .transform(new MovementTransformer, accountsStoreName)
 
