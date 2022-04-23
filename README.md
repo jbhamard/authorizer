@@ -32,18 +32,20 @@ The `movements` kafka messages are consumed from the `bank-account-movements` :
 }
 ```
 
-The processor publishes authorization results in the `movements-authorizations` topic : 
+The processor publishes authorization results in the `movements-authorizations` topic :
 
 ```json
 {
-"key":"iban", //String,
-"value": {
-  "movementId": String,
-  "amountCents": Long,
-  "balanceCents": Long,
-  "iban": String,
-  "authorized": Boolean
-}
+  "key": "iban",
+  //String,
+  "value": {
+    "movementId": String,
+    "amountCents": Long,
+    "balanceCents": Long,
+    "iban": String,
+    "authorized": Boolean,
+    "declinedReason": String
+  }
 ```
 
 ## Build and run
@@ -81,7 +83,7 @@ The app should now be running.
 
 In order to use the app, we need to create a producer to `bank-account-movements` and `bank-account` and a consumer of `movements-authorizations` :
 
-In your kafka container, run the producer :
+In your kafka container, run the producers :
 
 ```
 # this starts the producer and produces a movement on iban1
@@ -96,6 +98,8 @@ In your kafka container, run the producer :
 /bin/kafka-console-producer --broker-list localhost:9092 --topic bank-account --property parse.key=true --property key.separator=,
 >iban1,{"iban":"iban1","creditBlocked":false,"debitBlocked":false,"closed":false}
 ```
+
+Finally, start the output topic consumer : 
 
 `/bin/kafka-console-consumer --topic movements-authorizations --from-beginning  --bootstrap-server kafka:9092  --property print.key=true`
 
