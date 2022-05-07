@@ -1,7 +1,7 @@
 package com.qonto.streams
 
+import com.qonto.streams.domains.Domains._
 import com.qonto.streams.movements.MovementTransformer
-import com.qonto.streams.serde.JsonSerde
 import org.apache.kafka.streams.scala.StreamsBuilder
 import org.apache.kafka.streams.scala.kstream.{KStream, KTable}
 import org.apache.kafka.streams.state.Stores
@@ -12,9 +12,9 @@ import java.util.Properties
 
 object Authorizer extends App {
 
+  import com.qonto.streams.domains.Domains.BankAccountSerde._
   import org.apache.kafka.streams.scala.ImplicitConversions._
   import org.apache.kafka.streams.scala.serialization.Serdes._
-
 
   val config: Properties = {
     val p = new Properties()
@@ -26,27 +26,6 @@ object Authorizer extends App {
     p.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers)
     p
   }
-
-  case class BankAccount(iban: String, creditBlocked: Boolean, debitBlocked: Boolean, closed: Boolean)
-  implicit val bankAccountSerde = new JsonSerde[BankAccount]
-
-  case class BankAccountMovement(movementId: String, amountCents: Long, iban: String, direction: String)
-  implicit val bankAccountMovementsSerde = new JsonSerde[BankAccountMovement]
-
-  case class  MovementWithBankAccount(movement: BankAccountMovement, bankAccount: BankAccount)
-
-  case class BankAccountMovementAuthorization(
-    movementId: String,
-    amountCents: Long,
-    balanceCents: Long,
-    iban: String,
-    authorized: Boolean,
-    declinedReason: String
-  )
-  implicit val bankAccountMovementAuthorizationsSerde = new JsonSerde[BankAccountMovementAuthorization]
-
-  case class BankAccountBalance(iban: String, balance: Long)
-  implicit val bankAccountBalanceSerde = new JsonSerde[BankAccountBalance]
 
   val builder = new StreamsBuilder()
 
@@ -70,12 +49,14 @@ object Authorizer extends App {
   builder.addStateStore(bankAccountBalanceStore)
 
   val movementAuthorizationStream: KStream[String, BankAccountMovementAuthorization] = movementsWithBankAccount
-    .peek((_, mvt) => println(mvt))
     .transform(new MovementTransformer, accountsStoreName)
 
   movementAuthorizationStream.to("movements-authorizations")
 
-  val streams: KafkaStreams = new KafkaStreams(builder.build(), config)
+  val built = builder.build()
+  println(built.describe())
+
+  val streams: KafkaStreams = new KafkaStreams(built, config)
 
   // Always (and unconditionally) clean local state prior to starting the processing topology.
   // We opt for this unconditional call here because this will make it easier for you to play around with the example

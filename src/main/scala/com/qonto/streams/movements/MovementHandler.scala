@@ -1,6 +1,7 @@
 package com.qonto.streams.movements
 
-import com.qonto.streams.Authorizer.{BankAccount, BankAccountBalance, BankAccountMovement, BankAccountMovementAuthorization, MovementWithBankAccount, accountsStoreName}
+import com.qonto.streams.Authorizer.accountsStoreName
+import com.qonto.streams.domains.Domains.{BankAccount, BankAccountBalance, BankAccountMovement, BankAccountMovementAuthorization, MovementWithBankAccount}
 import org.apache.kafka.streams.KeyValue
 import org.apache.kafka.streams.kstream.{Transformer, TransformerSupplier}
 import org.apache.kafka.streams.processor.ProcessorContext
@@ -15,9 +16,9 @@ class MovementHandler extends Transformer[String, MovementWithBankAccount, KeyVa
   }
 
   override def transform(iban: String, movementWithAccount: MovementWithBankAccount): KeyValue[String, BankAccountMovementAuthorization] = {
-    val currentAccountBalanceState = bankAccountsBalanceStore.get(iban)
-    val movement = movementWithAccount.movement
-    val bankAccount = movementWithAccount.bankAccount
+    val currentAccountBalanceState: BankAccountBalance = bankAccountsBalanceStore.get(iban)
+    val movement: BankAccountMovement = movementWithAccount.movement
+    val bankAccount: BankAccount = movementWithAccount.bankAccount
 
     if (bankAccount == null) {
       return KeyValue.pair[String, BankAccountMovementAuthorization](iban, BankAccountMovementAuthorization(
@@ -49,9 +50,9 @@ class MovementHandler extends Transformer[String, MovementWithBankAccount, KeyVa
 
     movement.direction match {
       case "credit" =>
-        return updateStore(handleCredit(movement, bankAccount, currentBalance))
+        updateStore(handleCredit(movement, bankAccount, currentBalance))
       case "debit" =>
-        return updateStore(handleDebit(movement, bankAccount, currentBalance))
+        updateStore(handleDebit(movement, bankAccount, currentBalance))
     }
   }
 
@@ -59,7 +60,7 @@ class MovementHandler extends Transformer[String, MovementWithBankAccount, KeyVa
 
   def handleCredit(movement: BankAccountMovement, bankAccount: BankAccount, currentBalance: Long): BankAccountMovementAuthorization = {
     if (bankAccount.creditBlocked) {
-      return BankAccountMovementAuthorization(
+      BankAccountMovementAuthorization(
         movement.movementId,
         movement.amountCents,
         currentBalance,
@@ -68,7 +69,7 @@ class MovementHandler extends Transformer[String, MovementWithBankAccount, KeyVa
         "account_is_credit_blocked"
       )
     } else {
-      return BankAccountMovementAuthorization(
+      BankAccountMovementAuthorization(
         movement.movementId,
         movement.amountCents,
         currentBalance + movement.amountCents,
