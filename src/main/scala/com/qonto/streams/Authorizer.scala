@@ -1,5 +1,6 @@
 package com.qonto.streams
 
+import com.qonto.streams.domains.Domains
 import com.qonto.streams.domains.Domains._
 import com.qonto.streams.movements.MovementTransformer
 import org.apache.kafka.streams.scala.StreamsBuilder
@@ -18,40 +19,37 @@ object Authorizer extends App {
 
   val config: Properties = {
     val p = new Properties()
-
     // This APPLICATION_ID_CONFIG gives its name to the consumer group
     p.put(StreamsConfig.APPLICATION_ID_CONFIG, "authorizer")
-
-    val bootstrapServers = if (args.length > 0) args(0) else "kafka:9092"
-    p.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers)
+    val bootstrapServers = if (args.length > 0) args(0) else "0.0.0.0:9092"
+    p.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "bootstrapServers")
     p
   }
 
   val builder = new StreamsBuilder()
 
-  val bankAccountsTable: KTable[String, BankAccount] = builder.table[String, BankAccount]("bank-account")
+  val bankAccountsTable: KTable[String, BankAccount] = builder.table[String, BankAccount](KafkaConstants.bankAccountTableTopic)
 
   val bankAccountMovements: KStream[String, BankAccountMovement] =
-    builder.stream[String, BankAccountMovement]("bank-account-movements")
+    builder.stream[String, BankAccountMovement](KafkaConstants.bankAccountMovementsTopic)
 
   val movementsWithBankAccount: KStream[String, MovementWithBankAccount] =
-    bankAccountMovements.leftJoin[BankAccount, MovementWithBankAccount](bankAccountsTable) {(BankAccountMovement, BankAccount) =>
-      MovementWithBankAccount(BankAccountMovement ,BankAccount)
+    bankAccountMovements.leftJoin[BankAccount, MovementWithBankAccount](bankAccountsTable) { (BankAccountMovement, BankAccount) =>
+      MovementWithBankAccount(BankAccountMovement, BankAccount)
     }
 
-  val accountsStoreName = "bank-accounts-balance-store"
   val bankAccountBalanceStore = Stores.keyValueStoreBuilder(
-    Stores.persistentKeyValueStore(accountsStoreName),
+    Stores.persistentKeyValueStore(KafkaConstants.accountsStoreName),
     stringSerde,
     bankAccountBalanceSerde
   ).withCachingEnabled()
 
   builder.addStateStore(bankAccountBalanceStore)
 
-  val movementAuthorizationStream: KStream[String, BankAccountMovementAuthorization] = movementsWithBankAccount
-    .transform(new MovementTransformer, accountsStoreName)
+  val movementAuthorizationStream: KStream[String, Domains.BankAccountMovementOperation] = movementsWithBankAccount
+    .transform(new MovementTransformer, KafkaConstants.accountsStoreName)
 
-  movementAuthorizationStream.to("movements-authorizations")
+  movementAuthorizationStream.to(KafkaConstants.movementAuthorizations)
 
   val built = builder.build()
   println(built.describe())
@@ -76,4 +74,11 @@ object Authorizer extends App {
   sys.ShutdownHookThread {
     streams.close(Duration.ofSeconds(10))
   }
+}
+
+object KafkaConstants {
+  val bankAccountTableTopic: String = "bank-account"
+  val bankAccountMovementsTopic = "bank-account-movements"
+  val accountsStoreName = "bank-accounts-balance-store"
+  val movementAuthorizations = "movements-authorizations"
 }
