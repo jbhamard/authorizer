@@ -1,131 +1,81 @@
 package com.qonto.streams.movements
 
-import com.qonto.streams.Authorizer.accountsStoreName
-import com.qonto.streams.domains.Domains.{BankAccount, BankAccountBalance, BankAccountMovement, BankAccountMovementAuthorization, MovementWithBankAccount}
+import com.qonto.streams.KafkaConstants
+import com.qonto.streams.domains.Domains
+import com.qonto.streams.domains.Domains._
 import org.apache.kafka.streams.KeyValue
 import org.apache.kafka.streams.kstream.{Transformer, TransformerSupplier}
 import org.apache.kafka.streams.processor.ProcessorContext
 import org.apache.kafka.streams.state.KeyValueStore
 
-class MovementHandler extends Transformer[String, MovementWithBankAccount, KeyValue[String, BankAccountMovementAuthorization]] {
+class MovementHandler(accountStoreName: String) extends Transformer[String, MovementWithBankAccount, KeyValue[String, Domains.BankAccountMovementOperation]] {
 
   private var bankAccountsBalanceStore: KeyValueStore[String, BankAccountBalance] = _
 
-  override def init(processorContext: ProcessorContext): Unit = {
-    bankAccountsBalanceStore = processorContext.getStateStore(accountsStoreName)
-  }
+  override def init(processorContext: ProcessorContext): Unit = bankAccountsBalanceStore = processorContext.getStateStore(accountStoreName)
 
-  override def transform(iban: String, movementWithAccount: MovementWithBankAccount): KeyValue[String, BankAccountMovementAuthorization] = {
-    val currentAccountBalanceState: BankAccountBalance = bankAccountsBalanceStore.get(iban)
+  override def transform(iban: String, movementWithAccount: MovementWithBankAccount): KeyValue[String, Domains.BankAccountMovementOperation] = {
+    val balance: Long = Option(bankAccountsBalanceStore.get(iban)).map(_.balance).getOrElse(0)
     val movement: BankAccountMovement = movementWithAccount.movement
-    val bankAccount: BankAccount = movementWithAccount.bankAccount
+    val bankAccount: Option[BankAccount] = Option(movementWithAccount.bankAccount)
 
-    if (bankAccount == null) {
-      return KeyValue.pair[String, BankAccountMovementAuthorization](iban, BankAccountMovementAuthorization(
-        movement.movementId,
-        movement.amountCents,
-        0,
-        iban,
-        false,
-        "account_not_found"
-      ))
-    }
-
-    var currentBalance: Long = 0
-
-    if (currentAccountBalanceState != null) {
-      currentBalance = currentAccountBalanceState.balance
-    }
-
-    if (bankAccount.closed) {
-      return KeyValue.pair[String, BankAccountMovementAuthorization](iban, BankAccountMovementAuthorization(
-        movement.movementId,
-        movement.amountCents,
-        currentBalance,
-        iban,
-        false,
-        "account_closed"
-      ))
-    }
-
-    movement.direction match {
-      case "credit" =>
-        updateStore(handleCredit(movement, bankAccount, currentBalance))
-      case "debit" =>
-        updateStore(handleDebit(movement, bankAccount, currentBalance))
+    (bankAccount.map(_.closed), movement.direction, bankAccount) match {
+      case (None, _, _) =>
+        KeyValue.pair[String, Domains.BankAccountMovementOperation](iban, BankAccountMovementOperation(
+          movement.movementId,
+          movement.amountCents,
+          balance,
+          iban,
+          "account_not_found",
+          false
+        ))
+      case (Some(true), _, _) =>
+          KeyValue.pair[String, Domains.BankAccountMovementOperation](iban, BankAccountMovementOperation(
+          movement.movementId,
+          movement.amountCents,
+          balance,
+          iban,
+          "account_closed",
+          false
+        ))
+      case (Some(false), "credit", Some(account)) => updateStore(handleCredit(movement, account, balance))
+      case (Some(false), "debit", Some(account)) => updateStore(handleDebit(movement, account, balance))
+      case (_, _, _) => throw new Exception("Invalid movement direction on an opened account")
     }
   }
 
   override def close(): Unit = {}
 
-  def handleCredit(movement: BankAccountMovement, bankAccount: BankAccount, currentBalance: Long): BankAccountMovementAuthorization = {
-    if (bankAccount.creditBlocked) {
-      BankAccountMovementAuthorization(
-        movement.movementId,
-        movement.amountCents,
-        currentBalance,
-        movement.iban,
-        false,
-        "account_is_credit_blocked"
-      )
-    } else {
-      BankAccountMovementAuthorization(
-        movement.movementId,
-        movement.amountCents,
-        currentBalance + movement.amountCents,
-        movement.iban,
-        true,
-        null
-      )
+  private def handleCredit(movement: BankAccountMovement, bankAccount: BankAccount, currentBalance: Long): Either[BankAccountMovementOperation, BankAccountMovementOperation] = {
+    bankAccount.creditBlocked match {
+      case true => Left(BankAccountMovementOperation(movement.movementId, movement.amountCents, currentBalance, movement.iban, "account_is_credit_blocked", false))
+      case false => Right(BankAccountMovementOperation(movement.movementId, movement.amountCents, currentBalance + movement.amountCents, movement.iban, null, true))
     }
   }
 
-  def handleDebit(movement: BankAccountMovement, bankAccount: BankAccount, currentBalance: Long): BankAccountMovementAuthorization = {
-    if (bankAccount.debitBlocked) {
-      return BankAccountMovementAuthorization(
-        movement.movementId,
-        movement.amountCents,
-        currentBalance,
-        movement.iban,
-        false,
-        "account_is_debit_blocked"
-      )
+  private def handleDebit(movement: BankAccountMovement, bankAccount: BankAccount, currentBalance: Long): Either[BankAccountMovementOperation, BankAccountMovementOperation] = {
+    (bankAccount.debitBlocked, currentBalance - movement.amountCents) match {
+      case (true, _) =>
+        Left(BankAccountMovementOperation(movement.movementId, movement.amountCents, currentBalance, movement.iban, "account_is_debit_blocked", false))
+      case (false, projectedBalance) if projectedBalance < 0 =>
+        Left(BankAccountMovementOperation(movement.movementId, movement.amountCents, currentBalance , movement.iban, "insufficient_funds", false))
+      case (false, projectedBalance) =>
+        Right(BankAccountMovementOperation(movement.movementId, movement.amountCents, projectedBalance, movement.iban, null, true))
     }
-
-    var balance: Long = 0
-    var authorized: Boolean = false
-    var declinedReason: String = null
-
-    val projectedBalance = currentBalance - movement.amountCents
-
-    if (projectedBalance < 0) {
-      balance = currentBalance
-      authorized = false
-      declinedReason = "insufficient_funds"
-    } else {
-      balance = projectedBalance
-      authorized = true
-    }
-
-    return BankAccountMovementAuthorization(
-      movement.movementId,
-      movement.amountCents,
-      balance,
-      movement.iban,
-      authorized,
-      declinedReason
-    )
   }
 
-  def updateStore(res: BankAccountMovementAuthorization): KeyValue[String, BankAccountMovementAuthorization] = {
-    if (res.authorized) {
-      bankAccountsBalanceStore.put(res.iban, BankAccountBalance(res.iban, res.balanceCents))
+  private def updateStore(res: Either[BankAccountMovementOperation, BankAccountMovementOperation
+  ]): KeyValue[String, Domains.BankAccountMovementOperation] = {
+    res match {
+      case Right(authorized) =>
+        bankAccountsBalanceStore.put(authorized.iban, BankAccountBalance(authorized.iban, authorized.balanceCents))
+        KeyValue.pair[String, Domains.BankAccountMovementOperation](authorized.iban, authorized)
+      case Left(declined) =>
+        KeyValue.pair[String, Domains.BankAccountMovementOperation](declined.iban, declined)
     }
-
-    return KeyValue.pair[String, BankAccountMovementAuthorization](res.iban, res)
   }
 }
 
-class MovementTransformer extends TransformerSupplier[String, MovementWithBankAccount, KeyValue[String, BankAccountMovementAuthorization]] {
-  override def get(): Transformer[String, MovementWithBankAccount, KeyValue[String, BankAccountMovementAuthorization]] = new MovementHandler
+class MovementTransformer extends TransformerSupplier[String, MovementWithBankAccount, KeyValue[String, Domains.BankAccountMovementOperation]] {
+  override def get(): Transformer[String, MovementWithBankAccount, KeyValue[String, Domains.BankAccountMovementOperation]] = new MovementHandler(KafkaConstants.accountsStoreName)
 }

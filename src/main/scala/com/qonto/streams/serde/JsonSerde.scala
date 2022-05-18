@@ -23,7 +23,7 @@ import com.typesafe.scalalogging.LazyLogging
 
 import scala.reflect.{ClassTag, classTag}
 
-class JsonSerde[T >: Null : ClassTag] extends BaseSerde[T] with LazyLogging  {
+class JsonSerde[T >: Null : ClassTag] extends BaseSerde[T] with LazyLogging {
   val mapper = new ObjectMapper
   mapper.registerModule(DefaultScalaModule)
 
