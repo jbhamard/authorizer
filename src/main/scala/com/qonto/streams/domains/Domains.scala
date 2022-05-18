@@ -9,30 +9,15 @@ object Domains {
 
   final case class MovementWithBankAccount(movement: BankAccountMovement, bankAccount: BankAccount)
 
-  abstract class BankAccountMovementOperation {
-    val movementId: String
-    val amountCents: Long
-    val balanceCents: Long
-    val iban: String
-    val declinedReason: Option[String] = None
-    val authorized: Boolean
-  }
 
-  case class AuthorizedBankAccountMovement(movementId: String,
+
+  case class BankAccountMovementOperation(movementId: String,
                                            amountCents: Long,
                                            balanceCents: Long,
-                                           iban: String) extends BankAccountMovementOperation {
-    override val declinedReason: Option[String] = None
-    override val authorized: Boolean = true
-  }
+                                           iban: String,
+                                           declinedReason: String,
+                                           authorized: Boolean)
 
-  case class DeclinedBankAccountMovement(movementId: String,
-                                         amountCents: Long,
-                                         balanceCents: Long,
-                                         iban: String, reason: String) extends BankAccountMovementOperation {
-    override val declinedReason: Option[String] = Some(reason)
-    override val authorized: Boolean = false
-  }
 
   final case class BankAccountBalance(iban: String, balance: Long)
 

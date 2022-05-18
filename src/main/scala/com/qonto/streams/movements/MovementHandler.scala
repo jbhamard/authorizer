@@ -15,46 +15,57 @@ class MovementHandler(accountStoreName: String) extends Transformer[String, Move
   override def init(processorContext: ProcessorContext): Unit = bankAccountsBalanceStore = processorContext.getStateStore(accountStoreName)
 
   override def transform(iban: String, movementWithAccount: MovementWithBankAccount): KeyValue[String, Domains.BankAccountMovementOperation] = {
-    val currentAccountBalanceState: BankAccountBalance = bankAccountsBalanceStore.get(iban)
+    val balance: Long = Option(bankAccountsBalanceStore.get(iban)).map(_.balance).getOrElse(0)
     val movement: BankAccountMovement = movementWithAccount.movement
-    val bankAccount: BankAccount = movementWithAccount.bankAccount
+    val bankAccount: Option[BankAccount] = Option(movementWithAccount.bankAccount)
 
-    (bankAccount.closed, movement.direction) match {
-      case (true, _) =>
-        KeyValue.pair[String, Domains.BankAccountMovementOperation](iban, DeclinedBankAccountMovement(
+    (bankAccount.map(_.closed), movement.direction, bankAccount) match {
+      case (None, _, _) =>
+        KeyValue.pair[String, Domains.BankAccountMovementOperation](iban, BankAccountMovementOperation(
           movement.movementId,
           movement.amountCents,
-          currentAccountBalanceState.balance,
+          balance,
           iban,
-          "account_closed"
+          "account_not_found",
+          false
         ))
-      case (false, "credit") => updateStore(handleCredit(movement, bankAccount, currentAccountBalanceState.balance))
-      case (false, "debit") => updateStore(handleDebit(movement, bankAccount, currentAccountBalanceState.balance))
-      case (_, _) => throw new Exception("Invalid movement direction on an opened account")
+      case (Some(true), _, _) =>
+          KeyValue.pair[String, Domains.BankAccountMovementOperation](iban, BankAccountMovementOperation(
+          movement.movementId,
+          movement.amountCents,
+          balance,
+          iban,
+          "account_closed",
+          false
+        ))
+      case (Some(false), "credit", Some(account)) => updateStore(handleCredit(movement, account, balance))
+      case (Some(false), "debit", Some(account)) => updateStore(handleDebit(movement, account, balance))
+      case (_, _, _) => throw new Exception("Invalid movement direction on an opened account")
     }
   }
 
   override def close(): Unit = {}
 
-  private def handleCredit(movement: BankAccountMovement, bankAccount: BankAccount, currentBalance: Long): Either[DeclinedBankAccountMovement, AuthorizedBankAccountMovement] = {
+  private def handleCredit(movement: BankAccountMovement, bankAccount: BankAccount, currentBalance: Long): Either[BankAccountMovementOperation, BankAccountMovementOperation] = {
     bankAccount.creditBlocked match {
-      case true => Left(DeclinedBankAccountMovement(movement.movementId, movement.amountCents, currentBalance, movement.iban, "account_is_credit_blocked"))
-      case false => Right(AuthorizedBankAccountMovement(movement.movementId, movement.amountCents, currentBalance + movement.amountCents, movement.iban))
+      case true => Left(BankAccountMovementOperation(movement.movementId, movement.amountCents, currentBalance, movement.iban, "account_is_credit_blocked", false))
+      case false => Right(BankAccountMovementOperation(movement.movementId, movement.amountCents, currentBalance + movement.amountCents, movement.iban, null, true))
     }
   }
 
-  private def handleDebit(movement: BankAccountMovement, bankAccount: BankAccount, currentBalance: Long): Either[DeclinedBankAccountMovement, AuthorizedBankAccountMovement] = {
+  private def handleDebit(movement: BankAccountMovement, bankAccount: BankAccount, currentBalance: Long): Either[BankAccountMovementOperation, BankAccountMovementOperation] = {
     (bankAccount.debitBlocked, currentBalance - movement.amountCents) match {
       case (true, _) =>
-        Left(DeclinedBankAccountMovement(movement.movementId, movement.amountCents, currentBalance, movement.iban, "account_is_debit_blocked"))
+        Left(BankAccountMovementOperation(movement.movementId, movement.amountCents, currentBalance, movement.iban, "account_is_debit_blocked", false))
       case (false, projectedBalance) if projectedBalance < 0 =>
-        Left(DeclinedBankAccountMovement(movement.movementId, movement.amountCents, currentBalance + movement.amountCents, movement.iban, "insufficient_funds"))
-      case (false, _) =>
-        Right(AuthorizedBankAccountMovement(movement.movementId, movement.amountCents, currentBalance, movement.iban))
+        Left(BankAccountMovementOperation(movement.movementId, movement.amountCents, currentBalance , movement.iban, "insufficient_funds", false))
+      case (false, projectedBalance) =>
+        Right(BankAccountMovementOperation(movement.movementId, movement.amountCents, projectedBalance, movement.iban, null, true))
     }
   }
 
-  private def updateStore(res: Either[DeclinedBankAccountMovement, AuthorizedBankAccountMovement]): KeyValue[String, Domains.BankAccountMovementOperation] = {
+  private def updateStore(res: Either[BankAccountMovementOperation, BankAccountMovementOperation
+  ]): KeyValue[String, Domains.BankAccountMovementOperation] = {
     res match {
       case Right(authorized) =>
         bankAccountsBalanceStore.put(authorized.iban, BankAccountBalance(authorized.iban, authorized.balanceCents))

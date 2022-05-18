@@ -11,6 +11,13 @@ import org.apache.kafka.streams.{KafkaStreams, StreamsConfig}
 import java.time.Duration
 import java.util.Properties
 
+object KafkaConstants {
+  val bankAccountTableTopic: String = "bank-account"
+  val bankAccountMovementsTopic = "bank-account-movements"
+  val accountsStoreName = "bank-accounts-balance-store"
+  val movementAuthorizations = "movements-authorizations"
+}
+
 object Authorizer extends App {
 
   import com.qonto.streams.domains.Domains.BankAccountSerde._
@@ -21,10 +28,12 @@ object Authorizer extends App {
     val p = new Properties()
     // This APPLICATION_ID_CONFIG gives its name to the consumer group
     p.put(StreamsConfig.APPLICATION_ID_CONFIG, "authorizer")
-    val bootstrapServers = if (args.length > 0) args(0) else "0.0.0.0:9092"
-    p.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "bootstrapServers")
+    val bootstrapServers = if (args.length > 0) args(0) else "kafka:9092"
+    p.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers)
     p
   }
+
+
 
   val builder = new StreamsBuilder()
 
@@ -49,7 +58,9 @@ object Authorizer extends App {
   val movementAuthorizationStream: KStream[String, Domains.BankAccountMovementOperation] = movementsWithBankAccount
     .transform(new MovementTransformer, KafkaConstants.accountsStoreName)
 
-  movementAuthorizationStream.to(KafkaConstants.movementAuthorizations)
+  movementAuthorizationStream.peek((k,v) =>
+    println(v)
+  ).to(KafkaConstants.movementAuthorizations)
 
   val built = builder.build()
   println(built.describe())
@@ -74,11 +85,4 @@ object Authorizer extends App {
   sys.ShutdownHookThread {
     streams.close(Duration.ofSeconds(10))
   }
-}
-
-object KafkaConstants {
-  val bankAccountTableTopic: String = "bank-account"
-  val bankAccountMovementsTopic = "bank-account-movements"
-  val accountsStoreName = "bank-accounts-balance-store"
-  val movementAuthorizations = "movements-authorizations"
 }
