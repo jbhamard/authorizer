@@ -67,8 +67,8 @@ Then, in the container, create the required topics :
 
 ```bash
 
-/bin/kafka-topics --create --topic bank-account --zookeeper zookeeper --partitions 1 --replication-factor 1 --config "cleanup.policy=compact" 
-/bin/kafka-topics --create --topic bank-account-movements --zookeeper zookeeper --partitions 1 --replication-factor 1
+/bin/kafka-topics --create --topic bank-accounts --zookeeper zookeeper --partitions 1 --replication-factor 1 --config "cleanup.policy=compact" 
+/bin/kafka-topics --create --topic movements --zookeeper zookeeper --partitions 1 --replication-factor 1
 /bin/kafka-topics --create --topic movements-authorizations --zookeeper zookeeper --partitions 1 --replication-factor 1
 
 ```
@@ -81,21 +81,21 @@ The app should now be running.
 
 ## Create kafka producers and consumers
 
-In order to use the app, we need to create a producer to `bank-account-movements` and `bank-account` and a consumer of `movements-authorizations` :
+In order to use the app, we need to create a producer to `movements` and `bank-accounts` and a consumer of `movements-authorizations` :
 
 In your kafka container, run the producers :
 
 ```
 # this starts the producer and produces a movement on iban1
 
-/bin/kafka-console-producer --broker-list localhost:9092 --topic bank-account-movements --property parse.key=true --property key.separator=,
+/bin/kafka-console-producer --broker-list localhost:9092 --topic movements --property parse.key=true --property key.separator=,
 >iban1,{"movementId":"mvt_id","amountCents":100,"direction":"credit","iban":"iban1"}
 ```
 
 ```
 # this starts the producer and produces a bankAccount event on iban1
 
-/bin/kafka-console-producer --broker-list localhost:9092 --topic bank-account --property parse.key=true --property key.separator=,
+/bin/kafka-console-producer --broker-list localhost:9092 --topic bank-accounts --property parse.key=true --property key.separator=,
 >iban1,{"iban":"iban1","creditBlocked":false,"debitBlocked":false,"closed":false}
 ```
 

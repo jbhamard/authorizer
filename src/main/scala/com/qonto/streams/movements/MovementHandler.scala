@@ -76,6 +76,6 @@ class MovementHandler(accountStoreName: String) extends Transformer[String, Move
   }
 }
 
-class MovementTransformer extends TransformerSupplier[String, MovementWithBankAccount, KeyValue[String, Domains.BankAccountMovementOperation]] {
+class MovementAuthorizer extends TransformerSupplier[String, MovementWithBankAccount, KeyValue[String, Domains.BankAccountMovementOperation]] {
   override def get(): Transformer[String, MovementWithBankAccount, KeyValue[String, Domains.BankAccountMovementOperation]] = new MovementHandler(KafkaConstants.accountsStoreName)
 }

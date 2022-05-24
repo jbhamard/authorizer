@@ -2,7 +2,7 @@ package com.qonto.streams
 
 import com.qonto.streams.domains.Domains
 import com.qonto.streams.domains.Domains._
-import com.qonto.streams.movements.MovementTransformer
+import com.qonto.streams.movements.MovementAuthorizer
 import org.apache.kafka.streams.scala.StreamsBuilder
 import org.apache.kafka.streams.scala.kstream.{KStream, KTable}
 import org.apache.kafka.streams.state.Stores
@@ -12,8 +12,8 @@ import java.time.Duration
 import java.util.Properties
 
 object KafkaConstants {
-  val bankAccountTableTopic: String = "bank-account"
-  val bankAccountMovementsTopic = "bank-account-movements"
+  val bankAccountTableTopic: String = "bank-accounts"
+  val movementsTopic = "movements"
   val accountsStoreName = "bank-accounts-balance-store"
   val movementAuthorizations = "movements-authorizations"
 }
@@ -40,7 +40,7 @@ object Authorizer extends App {
   val bankAccountsTable: KTable[String, BankAccount] = builder.table[String, BankAccount](KafkaConstants.bankAccountTableTopic)
 
   val bankAccountMovements: KStream[String, BankAccountMovement] =
-    builder.stream[String, BankAccountMovement](KafkaConstants.bankAccountMovementsTopic)
+    builder.stream[String, BankAccountMovement](KafkaConstants.movementsTopic)
 
   val movementsWithBankAccount: KStream[String, MovementWithBankAccount] =
     bankAccountMovements.leftJoin[BankAccount, MovementWithBankAccount](bankAccountsTable) { (BankAccountMovement, BankAccount) =>
@@ -56,7 +56,7 @@ object Authorizer extends App {
   builder.addStateStore(bankAccountBalanceStore)
 
   val movementAuthorizationStream: KStream[String, Domains.BankAccountMovementOperation] = movementsWithBankAccount
-    .transform(new MovementTransformer, KafkaConstants.accountsStoreName)
+    .transform(new MovementAuthorizer, KafkaConstants.accountsStoreName)
 
   movementAuthorizationStream.peek((k,v) =>
     println(v)
